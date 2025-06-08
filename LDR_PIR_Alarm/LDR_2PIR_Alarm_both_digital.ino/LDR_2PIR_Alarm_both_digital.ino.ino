@@ -26,17 +26,17 @@
 
 //Assign analogue pins
 const int Pin_LDR= A0;           // A0 reads from voltage divider (500Ω + 300Ω)
-
+const int Pin_Pressure_Plate = A1; //NO pressure plate
 
 //Assign digital pins
 const int Pin_PIR_No8 = 2;           // Digital pin for PIR no8
 const int Pin_PIR_1_Digital = 3;          // Digital pin for 3-pin PIR module
-const int Pin_PIR_2_Digital = 6;          // Digital pin for 3-pin PIR module
 const int Pin_Arming = 4;          // Arming toggle switch
-const int PIN_Break_Screen = 5;
+const int PIN_Break_Screen = 5; //break screen
+const int Pin_PIR_2_Digital = 6;          // Digital pin for 3-pin PIR module
 const int Pin_AIR_AbusLS1020 = 7;          // AIR sensor Abus LS1020
 const int Pin_Output = 9;            // LED connected to D9
-
+const int Pin_Arming_Indicator = 10;           // Arming indicator
 
 //Assign other constants
 const int Battery_PIR_No8 = 9;           // 9V battery on the PIR. (for comment/info only)
@@ -46,7 +46,9 @@ const unsigned long disarmDelay = 10 * 1000;        // Milliseconds to disarm (1
 bool Output_State = false;       // Stores the persistent state of the alarm
 bool latchEnabled = true;        // Set to false for real-time behavior
 
+
 float LDR_tolerance_percent = 20.0;       // % deviation allowed from threshold
+float pressure_plate_tolerance_percent = 6.0;       // % deviation allowed from threshold
 int LDR_ambient_light = 20;               // Will be measured
 
 unsigned long lastCalibrationTime = 0;
@@ -54,6 +56,11 @@ const unsigned long calibrationInterval = 5UL * 60UL * 1000UL; // 10 minutes
 const unsigned long calibrationTime = 2 * 1000;     // LDR calibration time (2 SEC)
 
 bool firstLoop = true;                    // Controls arming delay
+bool disarmedDuringOperation = false; // Set true when disarmed once during run. This is used to ensure an arming sequence where the system is armed, disarmed and then rearmed withotu being powered down.
+bool systemLocked = false; // Set to true when disarm is detected; permanently halts system activity
+bool armingReenabled = false;  // Set to true when re-armed after disarming
+
+
 
 String alarmCause = "None";               // Tracks which sensor triggered the alarm
 
@@ -62,17 +69,20 @@ bool LDR_monitor();
 bool PIR_monitor();
 bool break_screen_monitor();
 bool sensor_monitor();
+bool pressure_plate_monitor();
 void alarm_monitor(bool alarm);
 void arming_delay();
 void calibrate_LDR_ambient();
-
 void setup()
+
 {
   //Setup the digital pins
   pinMode(Pin_Output, OUTPUT);
+  pinMode(Pin_Arming_Indicator, OUTPUT);
   pinMode(Pin_PIR_No8, INPUT_PULLUP);
   pinMode(Pin_PIR_1_Digital, INPUT);
   pinMode(Pin_PIR_2_Digital, INPUT);
+  pinMode(Pin_Pressure_Plate, INPUT);
   pinMode(Pin_AIR_AbusLS1020, INPUT_PULLUP);
   pinMode(PIN_Break_Screen, INPUT);
   pinMode(Pin_Arming, INPUT_PULLUP);
@@ -83,45 +93,71 @@ void setup()
 }
 
 void loop() {
-  if (digitalRead(Pin_Arming) == HIGH)
-  {
-    arming_delay();  // One-time arming delay
+  static bool armingStatePrevious = LOW;
+  bool armingStateCurrent = digitalRead(Pin_Arming);
 
-    // Periodic re-calibration of LDR
-    if (millis() - lastCalibrationTime >= calibrationInterval)
-    {
+  if (systemLocked) {
+    return; // System is permanently halted
+  }
+
+  // Detect disarm
+  if (armingStatePrevious == HIGH && armingStateCurrent == LOW) {
+    Serial.println("System disarmed");
+    disarmedDuringOperation = true;
+    return; // Don't lock; allow rearming
+  }
+
+  // Detect re-arm (LOW → HIGH)
+  if ((firstLoop || disarmedDuringOperation) && armingStatePrevious == LOW && armingStateCurrent == HIGH)
+  {
+    armingReenabled = true;
+    
+  }
+
+
+  armingStatePrevious = armingStateCurrent;
+
+  if (armingStateCurrent == HIGH)
+  {
+    arming_delay(); // Only runs if firstLoop or armingReenabled is true (inside)
+    digitalWrite(Pin_Arming_Indicator, HIGH); // show system is armed
+
+    if (millis() - lastCalibrationTime >= calibrationInterval) {
       calibrate_LDR_ambient();
       lastCalibrationTime = millis();
     }
 
-    if (Output_State)
-    {
-      Serial.println("Loop halted due to latched alarm.");
-      while (true);  // Infinite halt
+    if (Output_State) {
+      Serial.println("Loop halted due to alarmed/triggered system");
+      while (true);
     }
 
-    // Check sensor-based inputs. Alarm activates if any trigger
     bool alarm = sensor_monitor();
-
     alarm_monitor(alarm);
   }
-  // Else: do nothing
+  
+  else
+  {
+  digitalWrite(Pin_Arming_Indicator, LOW); // show system is disarmed
+  }
+
 }
 
 
-void arming_delay()
-{
-  if (firstLoop)
-  {
+void arming_delay() {
+  if (firstLoop || armingReenabled || disarmedDuringOperation) {
     Serial.print("Arming commenced. Delay: ");
     Serial.print(armingDelay);
     Serial.println(" ms");
     delay(armingDelay);
     firstLoop = false;
+    armingReenabled = false;
+    disarmedDuringOperation = false; // ✅ Clear disarm flag after delay
     Serial.println("System Armed");
-  calibrate_LDR_ambient();    // Properly calibrate ambient light
+    calibrate_LDR_ambient();
   }
 }
+
 
 void calibrate_LDR_ambient()
 {
@@ -153,14 +189,24 @@ void calibrate_LDR_ambient()
 
 }
 
-//include an armed indicator
-//include a Pressure plate switch
 
 bool AIR_monitor()
 {
   int AIRState = digitalRead(Pin_AIR_AbusLS1020);
   return (AIRState == LOW);
 }
+
+bool pressure_plate_monitor()
+{
+    int pressure_plate_voltage = analogRead(Pin_Pressure_Plate);
+
+    float pressure_plate_voltage_trigger = 1023.0 * (pressure_plate_tolerance_percent / 100.0);
+    delay(50);
+
+    return pressure_plate_voltage > pressure_plate_voltage_trigger;
+}
+
+
 
 
 
@@ -254,6 +300,13 @@ bool sensor_monitor()
     return true;
   }
 
+  bool PressureAlarm = pressure_plate_monitor();
+  if (PressureAlarm)
+  {
+    alarmCause = "Pressure plate";
+    Serial.println("Alarm triggered by Pressure plate");
+    return true;
+  }
   bool PIRAlarm = PIR_monitor();
   return PIRAlarm;
 }
@@ -268,6 +321,8 @@ void disarm_prompt()
 bool disarm_check() {
   return digitalRead(Pin_Arming) == HIGH;
 }
+
+
 
 void alarm_monitor(bool alarm)
 {
