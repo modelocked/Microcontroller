@@ -214,24 +214,38 @@ bool LDR_monitor()
 {
   int LDRValue = analogRead(Pin_LDR);
 
-  float lowerBound = LDR_ambient_light * (1.0 - LDR_tolerance_percent / 100.0);
-  float upperBound = LDR_ambient_light * (1.0 + LDR_tolerance_percent / 100.0);
-
-  //Serial.print("LDR reading: ");
-  //Serial.println(LDRValue);
-
-  if (LDRValue < lowerBound || LDRValue > upperBound)
+  if (LDR_ambient_light < 20)
   {
-    Serial.print("LDR out of range (");
-    Serial.print(lowerBound);
-    Serial.print(" - ");
-    Serial.print(upperBound);
-    Serial.println(")");
-    return true;
+    // Low light condition: use absolute bounds
+    int lower = LDR_ambient_light - 3;
+    float upperBound = LDR_ambient_light * (1.0 + LDR_tolerance_percent / 100.0);
+
+    if (LDRValue < lower || LDRValue > upper)
+    {
+      Serial.println("LDR out of range (±3 units, low light)");
+      return true;
+    }
+  }
+  else
+  {
+    // Normal condition: use percentage bounds
+    float lowerBound = LDR_ambient_light * (1.0 - LDR_tolerance_percent / 100.0);
+    float upperBound = LDR_ambient_light * (1.0 + LDR_tolerance_percent / 100.0);
+
+    if (LDRValue < lowerBound || LDRValue > upperBound)
+    {
+      Serial.print("LDR out of range (");
+      Serial.print(lowerBound);
+      Serial.print(" - ");
+      Serial.print(upperBound);
+      Serial.println(")");
+      return true;
+    }
   }
 
   return false;
 }
+
 
 bool PIR_monitor()
 {
