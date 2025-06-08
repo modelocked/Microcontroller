@@ -75,7 +75,7 @@ void setup()
   pinMode(Pin_PIR_2_Digital, INPUT);
   pinMode(Pin_AIR_AbusLS1020, INPUT_PULLUP);
   pinMode(PIN_Break_Screen, INPUT);
-  pinMode(Pin_Arming, INPUT);
+  pinMode(Pin_Arming, INPUT_PULLUP);
   
   //Other setup requirement
   Serial.begin(9600);  // Initialises serial communication at 9600 bits per second (baud) for debugging or data output via USB
@@ -152,6 +152,9 @@ void calibrate_LDR_ambient()
   }
 
 }
+
+//include an armed indicator
+//include a Pressure plate switch
 
 bool AIR_monitor()
 {
@@ -256,23 +259,36 @@ bool sensor_monitor()
 }
 
 //Give time to be disarmed by owner before alarming
-void disarm()
+void disarm_prompt()
 {
   Serial.println("Disarm");
   delay(disarmDelay);
 }
 
+bool disarm_check() {
+  return digitalRead(Pin_Arming) == HIGH;
+}
 
 void alarm_monitor(bool alarm)
 {
   if (latchEnabled)
   {
 
+    // Trigger alarm only if alarm condition is true and output is not already latched
     if (alarm && !Output_State)
     {
-      disarm();
-      Output_State = true;
-      Serial.println("ALARM LATCHED");
+      disarm_prompt(); //prompt the owner that the alarm is triggered and must be disarmed
+
+      if (disarm_check())
+      {
+        Output_State = true;
+        Serial.println("Alarm latched and firing");
+      }
+      else
+      {
+        Serial.println("Alarm disarmed");
+        return; // Exit if disarmed (Pin_Arming is LOW)
+      }
     }
 
     digitalWrite(Pin_Output, Output_State ? HIGH : LOW);
