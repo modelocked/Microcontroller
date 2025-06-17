@@ -40,7 +40,7 @@ const int Pin_Arming_Indicator = 10;           // Arming indicator
 
 //Assign other constants
 const int Battery_PIR_No8 = 9;           // 9V battery on the PIR. (for comment/info only)
-const unsigned long armingDelay = 10 * 1000;        // Milliseconds to arm (10 sec)
+const unsigned long armingDelay = 1UL * 60UL * 1000UL; // 10 minutes
 const unsigned long disarmDelay = 10 * 1000;        // Milliseconds to disarm (10 sec)
 
 bool Output_State = false;       // Stores the persistent state of the alarm
@@ -52,7 +52,7 @@ float pressure_plate_tolerance_percent = 6.0;       // % deviation allowed from 
 int LDR_ambient_light = 20;               // Will be measured
 
 unsigned long lastCalibrationTime = 0;
-const unsigned long calibrationInterval = 5UL * 60UL * 1000UL; // 10 minutes
+const unsigned long calibrationInterval = 5UL * 60UL * 1000UL; // 5 minutes
 const unsigned long calibrationTime = 2 * 1000;     // LDR calibration time (2 SEC)
 
 bool firstLoop = true;                    // Controls arming delay
@@ -213,34 +213,28 @@ bool pressure_plate_monitor()
 bool LDR_monitor()
 {
   int LDRValue = analogRead(Pin_LDR);
+  float minDarkness = 20.; //Define the LDR value below which it stops being dark sensitive
 
-  if (LDR_ambient_light < 20)
+  // Normal condition: use percentage bounds
+  float lowerBound = LDR_ambient_light * (1.0 - LDR_tolerance_percent / 100.0);
+  float upperBound = LDR_ambient_light * (1.0 + LDR_tolerance_percent / 100.0);
+
+  if (LDRValue < minDarkness && LDRValue > upperBound) //When in a dark ambient environment, LDR is light-sensitive only
   {
-    // Low light condition: use absolute bounds
-    int lower = LDR_ambient_light - 3;
-    float upperBound = LDR_ambient_light * (1.0 + LDR_tolerance_percent / 100.0);
-
-    if (LDRValue < lower || LDRValue > upper)
-    {
-      Serial.println("LDR out of range (±3 units, low light)");
-      return true;
-    }
+    Serial.print("Light-sensitive LDR detected light(");
+    Serial.print(upperBound);
+    Serial.println(")");
+    return true;
+    
   }
-  else
+  else if (LDRValue < lowerBound || LDRValue > upperBound) //General condition is to detect changes in brightness & darkness
   {
-    // Normal condition: use percentage bounds
-    float lowerBound = LDR_ambient_light * (1.0 - LDR_tolerance_percent / 100.0);
-    float upperBound = LDR_ambient_light * (1.0 + LDR_tolerance_percent / 100.0);
-
-    if (LDRValue < lowerBound || LDRValue > upperBound)
-    {
-      Serial.print("LDR out of range (");
-      Serial.print(lowerBound);
-      Serial.print(" - ");
-      Serial.print(upperBound);
-      Serial.println(")");
-      return true;
-    }
+    Serial.print("LDR out of range (");
+    Serial.print(lowerBound);
+    Serial.print(" - ");
+    Serial.print(upperBound);
+    Serial.println(")");
+    return true;
   }
 
   return false;
